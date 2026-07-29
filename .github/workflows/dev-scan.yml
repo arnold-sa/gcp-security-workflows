@@ -1,0 +1,64 @@
+name: DEV - Trivy filesystem scan
+
+on:
+  workflow_call:
+    inputs:
+      results_bucket:
+        description: GCS bucket name for durable scan result storage.
+        required: true
+        type: string
+    secrets:
+      WIF_PROVIDER:
+        description: Workload Identity Provider resource name.
+        required: true
+      RESULTS_UPLOADER_SA:
+        description: Narrowly scoped service account with roles/storage.objectCreator on the results bucket.
+        required: true
+
+jobs:
+  trivy-fs:
+    name: Trivy filesystem, secret, and config scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP for result upload
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
+          # This service account should only be able to create objects in the
+          # results bucket, not overwrite or delete existing findings.
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Prepare DEV results directory
+        run: mkdir -p dev-results
+
+      - name: Run Trivy against the repository
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,config
+          format: table
+          output: dev-results/trivy-dev.txt
+          exit-code: "1"
+          # DEV gates pull requests and merges because findings are still cheap to fix
+          # before an image is built or infrastructure is deployed.
+          ignore-unfixed: true
+
+      - name: Upload DEV results to GCS
+        if: always()
+        run: |
+          gcloud storage cp -r dev-results "gs://${{ inputs.results_bucket }}/dev/${{ github.run_id }}/"
+          # GitHub artifacts are short-lived; GCS keeps a durable copy under a
+          # stage-specific prefix for later audit, reporting, or querying.

@@ -1,0 +1,114 @@
+name: GCP security pipeline
+
+# Example caller workflow for a Terraform/GCP infrastructure repository.
+# The reusable security logic lives in your central gcp-security-workflows repo;
+# this file only wires repo-specific build, deploy, variables, and secrets into it.
+
+on:
+  # Pushes to main run DEV, BUILD, optional deploy, and DEPLOY scan.
+  push:
+    branches:
+      - main
+  # Pull requests run early checks only, so security issues can block merges.
+  pull_request:
+  schedule:
+    # NETWORK scans can be noisy and slow, so they run nightly instead of on PRs.
+    - cron: "0 3 * * *"
+  # Manual runs are useful while testing WIF, bucket uploads, and scan targets.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for GitHub OIDC tokens used by GCP Workload Identity Federation.
+  id-token: write
+  # Required when reusable workflows upload SARIF into GitHub code scanning.
+  security-events: write
+
+jobs:
+  dev-scan:
+    # DEV scans repository files, Terraform config, and secrets before build/deploy.
+    if: github.event_name != 'schedule'
+    uses: your-org/gcp-security-workflows/.github/workflows/dev-scan.yml@main
+    with:
+      results_bucket: ${{ vars.RESULTS_BUCKET }}
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}
+
+  build:
+    # Replace this placeholder with your real image build. The output image ref is
+    # passed to build-scan before the image should be pushed to Artifact Registry.
+    if: github.event_name != 'schedule'
+    needs: dev-scan
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build image placeholder
+        id: image
+        run: |
+          echo "Build your application container here."
+          echo "Do not push it to Artifact Registry until build-scan succeeds."
+          echo "ref=us-docker.pkg.dev/PROJECT_ID/REPOSITORY/IMAGE:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+  build-scan:
+    # BUILD scans the container image for HIGH/CRITICAL vulnerabilities.
+    if: github.event_name != 'schedule'
+    needs: build
+    uses: your-org/gcp-security-workflows/.github/workflows/build-scan.yml@main
+    with:
+      image: ${{ needs.build.outputs.image }}
+      results_bucket: ${{ vars.RESULTS_BUCKET }}
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}
+
+  deploy:
+    # Replace this placeholder with terraform init/plan/apply for this repo.
+    # It only runs on main after the image scan succeeds.
+    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
+    needs: build-scan
+    runs-on: ubuntu-latest
+    outputs:
+      gcp_project_id: ${{ steps.project.outputs.id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Terraform apply placeholder
+        id: project
+        run: |
+          echo "Run terraform init/plan/apply here for this infra repository."
+          echo "id=${{ vars.GCP_PROJECT_ID }}" >> "$GITHUB_OUTPUT"
+
+  deploy-scan:
+    # DEPLOY scans the live GCP project after Terraform succeeds. Prowler findings
+    # are uploaded for review, but the reusable workflow does not fail on findings.
+    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
+    needs: deploy
+    uses: your-org/gcp-security-workflows/.github/workflows/deploy-scan.yml@main
+    with:
+      gcp_project_id: ${{ needs.deploy.outputs.gcp_project_id }}
+      results_bucket: ${{ vars.RESULTS_BUCKET }}
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      PROWLER_SA: ${{ secrets.PROWLER_SA }}
+      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}
+      # Explicit mapping is clearer and limits what the reusable workflow receives.
+      # For faster setup, you can instead use:
+      # secrets: inherit
+
+  network-scan:
+    # NETWORK runs only on the nightly schedule against vars.SCAN_TARGET_CIDR.
+    # Keep the target small while testing, and only scan authorized ranges.
+    if: github.event_name == 'schedule'
+    uses: your-org/gcp-security-workflows/.github/workflows/network-scan.yml@main
+    with:
+      targets: ${{ vars.SCAN_TARGET_CIDR }}
+      results_bucket: ${{ vars.RESULTS_BUCKET }}
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}

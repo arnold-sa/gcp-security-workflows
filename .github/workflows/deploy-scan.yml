@@ -1,0 +1,91 @@
+name: DEPLOY - Prowler GCP scan
+
+on:
+  workflow_call:
+    inputs:
+      gcp_project_id:
+        description: GCP project ID to scan after terraform apply succeeds.
+        required: true
+        type: string
+      results_bucket:
+        description: GCS bucket name for durable scan result storage.
+        required: true
+        type: string
+    secrets:
+      WIF_PROVIDER:
+        description: Workload Identity Provider resource name.
+        required: true
+      PROWLER_SA:
+        description: Service account email that Prowler should impersonate.
+        required: true
+      RESULTS_UPLOADER_SA:
+        description: Narrowly scoped service account with roles/storage.objectCreator on the results bucket.
+        required: true
+
+jobs:
+  prowler-gcp:
+    name: Prowler GCP live configuration scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+
+    steps:
+      - name: Authenticate to GCP with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.PROWLER_SA }}
+          # No static JSON key is used here. GitHub receives a short-lived OIDC token,
+          # then GCP exchanges it for temporary credentials for this service account.
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Prowler
+        run: python -m pip install --upgrade prowler
+
+      - name: Run Prowler against the live GCP project
+        run: |
+          mkdir -p output
+          prowler gcp \
+            --project-ids "${{ inputs.gcp_project_id }}" \
+            --output-directory output \
+            --output-formats json sarif html \
+            || true
+          # Prowler is intentionally non-blocking here because terraform already changed
+          # live infrastructure. The artifact is used for alerting and follow-up work.
+
+      - name: Upload raw Prowler output
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prowler-${{ inputs.gcp_project_id }}-${{ github.sha }}
+          path: output/
+          if-no-files-found: warn
+
+      - name: Authenticate to GCP for result upload
+        uses: google-github-actions/auth@v2
+        if: always()
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
+          # This still uses Workload Identity Federation, but switches to the
+          # narrow bucket-writer identity before copying sensitive findings.
+
+      - name: Upload DEPLOY results to GCS
+        if: always()
+        run: |
+          gcloud storage cp -r output "gs://${{ inputs.results_bucket }}/deploy/${{ github.sha }}/"
+          # Do not add static keys or a second credential type for result storage.
+
+      - name: Upload Prowler SARIF to GitHub code scanning when present
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: output
+        continue-on-error: true
+        # Prowler can emit SARIF in current releases, but this remains best-effort so
+        # a format or path change does not hide the raw artifact uploaded above.
