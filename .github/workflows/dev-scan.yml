@@ -44,31 +44,17 @@ jobs:
         run: mkdir -p dev-results
 
       - name: Run Trivy against the repository
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.9.0
         with:
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret,config
-          format: sarif
-          output: dev-results/trivy-dev.sarif
+          format: table
+          output: dev-results/trivy-dev.txt
           exit-code: "1"
           # DEV gates pull requests and merges because findings are still cheap to fix
           # before an image is built or infrastructure is deployed.
-          # ignore-unfixed reduces noise from vulnerabilities that currently have no
-          # vendor fix. That also means those findings are excluded from this gate and
-          # stored report, so revisit this if your policy needs full visibility.
           ignore-unfixed: true
-
-      - name: Upload DEV SARIF as build artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: trivy-dev-sarif-${{ github.run_id }}
-          path: dev-results/trivy-dev.sarif
-          if-no-files-found: warn
-          retention-days: 14
-          # GitHub artifacts are for quick per-run viewing. GCS below is the durable
-          # store when results need to outlive normal artifact retention.
 
       - name: Upload DEV results to GCS
         if: always()
@@ -76,13 +62,3 @@ jobs:
           gcloud storage cp -r dev-results "gs://${{ inputs.results_bucket }}/dev/${{ github.run_id }}/"
           # GitHub artifacts are short-lived; GCS keeps a durable copy under a
           # stage-specific prefix for later audit, reporting, or querying.
-
-      - name: Upload DEV SARIF to GitHub code scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: dev-results/trivy-dev.sarif
-        continue-on-error: true
-        # The DEV gate should still fail when Trivy finds issues. This step is
-        # best-effort so a Security tab upload problem does not hide the scan result
-        # already saved as an artifact and in GCS.
