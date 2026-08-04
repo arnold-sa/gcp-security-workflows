@@ -52,6 +52,19 @@ jobs:
           echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
           echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
 
+      - name: Validate required inputs
+        shell: bash
+        run: |
+          if [ -z "${{ inputs.gcp_project_id }}" ]; then
+            echo "::error::gcp_project_id is empty. Set vars.GCP_PROJECT_ID or pass a workflow_dispatch input."
+            exit 1
+          fi
+
+          if [ -z "${{ inputs.results_bucket }}" ]; then
+            echo "::error::results_bucket is empty. Set vars.RESULTS_BUCKET or pass a workflow_dispatch input."
+            exit 1
+          fi
+
       - name: Install Prowler
         run: python -m pip install --upgrade prowler
 
@@ -64,6 +77,17 @@ jobs:
             --output-formats json-ocsf html csv \
             || true
           # Prowler is non-blocking here so live infrastructure findings can be triaged.
+
+      - name: Ensure Prowler result directory is not empty
+        if: always()
+        shell: bash
+        run: |
+          if ! find prowler-results -type f | grep -q .; then
+            printf 'Prowler completed, but no report files were produced.\nProject: %s\nRun ID: %s\n' \
+              "${{ inputs.gcp_project_id }}" \
+              "${{ github.run_id }}" \
+              > prowler-results/no-findings.txt
+          fi
 
       - name: Upload Prowler reports as GitHub artifact
         uses: actions/upload-artifact@v4
