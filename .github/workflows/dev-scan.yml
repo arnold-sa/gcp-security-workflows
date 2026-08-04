@@ -12,7 +12,7 @@ on:
         description: Workload Identity Provider resource name.
         required: true
       RESULTS_UPLOADER_SA:
-        description: Narrowly scoped service account with roles/storage.objectCreator on the results bucket.
+        description: Service account with permission to create objects in the results bucket.
         required: true
 
 jobs:
@@ -34,58 +34,77 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
-          # This service account should only be able to create objects in the
-          # results bucket, not overwrite or delete existing findings.
+          # This identity only needs bucket write access, such as roles/storage.objectCreator.
 
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Calculate GCS partition path
+        id: partition
+        shell: bash
+        run: |
+          # UTC keeps bucket partitions consistent across runner locations.
+          echo "year=$(date -u +%Y)" >> "$GITHUB_OUTPUT"
+          echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
+          echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
+
       - name: Prepare DEV results directory
         run: mkdir -p dev-results
 
-      - name: Run Trivy against the repository
-        # Pinned to the commit SHA for v0.35.0, a version confirmed genuine and
-        # unaffected by the March 2026 trivy-action supply chain attack (tags
-        # were force-pushed maliciously; a SHA pin can't be silently repointed).
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+      - name: Run Trivy filesystem scan as JSON
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: json
+          output: dev-results/trivy-fs.json
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Run Trivy filesystem scan as SARIF
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret,misconfig
           format: sarif
-          output: dev-results/trivy-dev.sarif
+          output: dev-results/trivy-fs.sarif
+          # DEV gates on Trivy findings because issues are cheapest to fix before merge.
           exit-code: "1"
-          # DEV gates pull requests and merges because findings are still cheap to fix
-          # before an image is built or infrastructure is deployed.
-          # ignore-unfixed reduces noise from vulnerabilities that currently have no
-          # vendor fix. That also means those findings are excluded from this gate and
-          # stored report, so revisit this if your policy needs full visibility.
           ignore-unfixed: true
 
-      - name: Upload DEV SARIF as build artifact
+      - name: Run Trivy filesystem scan as HTML
+        uses: aquasecurity/trivy-action@0.28.0
+        if: always()
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: template
+          template: "@/contrib/html.tpl"
+          output: dev-results/trivy-fs.html
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Upload DEV Trivy reports as GitHub artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: trivy-dev-sarif-${{ github.run_id }}
-          path: dev-results/trivy-dev.sarif
+          name: trivy-fs-${{ github.run_id }}
+          path: dev-results/
           if-no-files-found: warn
           retention-days: 14
-          # GitHub artifacts are for quick per-run viewing. GCS below is the durable
-          # store when results need to outlive normal artifact retention.
-
-      - name: Upload DEV results to GCS
-        if: always()
-        run: |
-          gcloud storage cp -r dev-results "gs://${{ inputs.results_bucket }}/dev/${{ github.run_id }}/"
-          # GitHub artifacts are short-lived; GCS keeps a durable copy under a
-          # stage-specific prefix for later audit, reporting, or querying.
 
       - name: Upload DEV SARIF to GitHub code scanning
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: dev-results/trivy-dev.sarif
+          sarif_file: dev-results/trivy-fs.sarif
         continue-on-error: true
-        # The DEV gate should still fail when Trivy finds issues. This step is
-        # best-effort so a Security tab upload problem does not hide the scan result
-        # already saved as an artifact and in GCS.
+
+      - name: Upload DEV Trivy reports to GCS
+        if: always()
+        run: |
+          gcloud storage cp -r dev-results/* \
+            "gs://${{ inputs.results_bucket }}/year=${{ steps.partition.outputs.year }}/month=${{ steps.partition.outputs.month }}/day=${{ steps.partition.outputs.day }}/tool=trivy_fs/run_id=${{ github.run_id }}/"

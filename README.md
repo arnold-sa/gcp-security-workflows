@@ -20,7 +20,7 @@ flowchart TD
     gha --> dev[DEV: Trivy filesystem scan]
     gha --> build[BUILD: Trivy image scan]
     gha --> deploy[DEPLOY: Prowler GCP scan]
-    gha --> network[NETWORK: Nmap and OpenVAS placeholder]
+    gha --> network[NETWORK: Nmap scan]
 
     secrets[GitHub secrets and variables] --> gha
     secrets --> wif[WIF_PROVIDER]
@@ -30,10 +30,10 @@ flowchart TD
     secrets --> project_input[GCP_PROJECT_ID]
     secrets --> targets_input[SCAN_TARGET_CIDR]
 
-    dev --> dev_out[dev-results/trivy-dev.sarif]
-    build --> build_out[build-results/trivy-image.sarif]
-    deploy --> deploy_out[output: JSON, SARIF, HTML]
-    network --> network_out[network-results: targets.txt, nmap.xml, OpenVAS placeholder]
+    dev --> dev_out[dev-results: JSON, SARIF, HTML]
+    build --> build_out[build-results: JSON, SARIF, HTML]
+    deploy --> deploy_out[prowler-results: JSON-OCSF, HTML, CSV]
+    network --> network_out[nmap-results: XML, text]
 
     dev_out --> artifacts[GitHub artifacts]
     build_out --> artifacts
@@ -42,16 +42,15 @@ flowchart TD
 
     dev_out --> code_scanning[GitHub code scanning]
     build_out --> code_scanning
-    deploy_out --> code_scanning
 
     gha --> auth[google-github-actions/auth with Workload Identity Federation]
     auth --> gcloud[google-github-actions/setup-gcloud]
     gcloud --> gcs[GCS results bucket]
 
-    dev_out --> dev_gcs[gs://bucket/dev/run_id/]
-    build_out --> build_gcs[gs://bucket/build/sha/]
-    deploy_out --> deploy_gcs[gs://bucket/deploy/sha/]
-    network_out --> network_gcs[gs://bucket/network/sha/]
+    dev_out --> dev_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=RUN_ID/]
+    build_out --> build_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=RUN_ID/]
+    deploy_out --> deploy_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=prowler/run_id=RUN_ID/]
+    network_out --> network_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=nmap/run_id=RUN_ID/]
 
     dev_gcs --> gcs
     build_gcs --> gcs
@@ -74,14 +73,14 @@ Use Workload Identity Federation only. Do not create or store static GCP JSON se
 account keys for these workflows.
 
 Each reusable workflow requires a `results_bucket` input. Results are uploaded with
-`gcloud storage cp -r` into stage-specific prefixes:
+`gcloud storage cp -r` into Hive-partitioned prefixes:
 
 | Workflow | GCS prefix |
 | --- | --- |
-| `dev-scan.yml` | `gs://<results_bucket>/dev/<run_id>/` |
-| `build-scan.yml` | `gs://<results_bucket>/build/<sha>/` |
-| `deploy-scan.yml` | `gs://<results_bucket>/deploy/<sha>/` |
-| `network-scan.yml` | `gs://<results_bucket>/network/<sha>/` |
+| `dev-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=<run_id>/` |
+| `build-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=<run_id>/` |
+| `deploy-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=prowler/run_id=<run_id>/` |
+| `network-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=nmap/run_id=<run_id>/` |
 
 Create the results bucket before using these workflows. Recommended bucket settings:
 uniform bucket-level access, public access prevention, object versioning, and a lifecycle
@@ -94,17 +93,15 @@ reachable services, and cloud misconfigurations, so treat the bucket as sensitiv
 lowest-cost place to fix dependency, secret, and IaC configuration issues.
 
 `build-scan.yml` scans the built container image and blocks only on `CRITICAL` and `HIGH`
-findings. It uploads SARIF as an artifact and attempts to publish the same SARIF to GitHub
-code scanning. It also copies the SARIF into GCS for longer-term retention.
+findings. It uploads JSON, SARIF, and HTML as artifacts, publishes SARIF to GitHub code
+scanning, and copies the reports into GCS for longer-term retention.
 
 `deploy-scan.yml` authenticates to GCP through GitHub OIDC and Workload Identity Federation,
 then runs `prowler gcp --project-ids <project_id>`. Prowler findings do not fail the job
 because the infrastructure is already live after `terraform apply`; the workflow uploads
-the raw report artifacts for alerting and follow-up, then copies the same output directory
-to GCS.
+JSON-OCSF, HTML, and CSV artifacts for alerting and follow-up, then copies the same output
+directory to GCS.
 
 `network-scan.yml` is designed for scheduled execution only from caller repositories. It
-runs Nmap with service detection and leaves a clear OpenVAS/GVM placeholder because real
-GVM integrations depend on your organization's manager endpoint, authentication, scanner
-IDs, and report export format. It uploads the network result directory both as a GitHub
-artifact and to GCS.
+runs Nmap with service detection and uploads XML plus standard text output both as a
+GitHub artifact and to GCS.
