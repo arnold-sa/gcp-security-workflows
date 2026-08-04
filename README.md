@@ -11,6 +11,54 @@ The real workflow logic lives in this central repository. Individual infrastruct
 repositories should call these files with GitHub Actions reusable workflows, as shown in
 `gcp-infra-repo-example/.github/workflows/security.yml`.
 
+## Workflow Diagram
+
+```mermaid
+flowchart TD
+    caller[Caller infrastructure repository] --> gha[GitHub Actions reusable workflows]
+
+    gha --> dev[DEV: Trivy filesystem scan]
+    gha --> build[BUILD: Trivy image scan]
+    gha --> deploy[DEPLOY: Prowler GCP scan]
+    gha --> network[NETWORK: Nmap and OpenVAS placeholder]
+
+    secrets[GitHub secrets and variables] --> gha
+    secrets --> wif[WIF_PROVIDER]
+    secrets --> uploader[RESULTS_UPLOADER_SA]
+    secrets --> prowler_sa[PROWLER_SA]
+    secrets --> bucket_input[RESULTS_BUCKET]
+    secrets --> project_input[GCP_PROJECT_ID]
+    secrets --> targets_input[SCAN_TARGET_CIDR]
+
+    dev --> dev_out[dev-results/trivy-dev.sarif]
+    build --> build_out[build-results/trivy-image.sarif]
+    deploy --> deploy_out[output: JSON, SARIF, HTML]
+    network --> network_out[network-results: targets.txt, nmap.xml, OpenVAS placeholder]
+
+    dev_out --> artifacts[GitHub artifacts]
+    build_out --> artifacts
+    deploy_out --> artifacts
+    network_out --> artifacts
+
+    dev_out --> code_scanning[GitHub code scanning]
+    build_out --> code_scanning
+    deploy_out --> code_scanning
+
+    gha --> auth[google-github-actions/auth with Workload Identity Federation]
+    auth --> gcloud[google-github-actions/setup-gcloud]
+    gcloud --> gcs[GCS results bucket]
+
+    dev_out --> dev_gcs[gs://bucket/dev/run_id/]
+    build_out --> build_gcs[gs://bucket/build/sha/]
+    deploy_out --> deploy_gcs[gs://bucket/deploy/sha/]
+    network_out --> network_gcs[gs://bucket/network/sha/]
+
+    dev_gcs --> gcs
+    build_gcs --> gcs
+    deploy_gcs --> gcs
+    network_gcs --> gcs
+```
+
 ## Required Configuration
 
 | Name | Type | Used by | Purpose |
