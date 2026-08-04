@@ -109,5 +109,8 @@ jobs:
       - name: Upload Prowler reports to GCS
         if: always()
         run: |
+          # Clean up empty directories (like 'compliance/') that cause gcloud cp to crash
+          find prowler-results -type d -empty -delete
+          
           gcloud storage cp -r prowler-results/* \
             "gs://${{ inputs.results_bucket }}/year=${{ steps.partition.outputs.year }}/month=${{ steps.partition.outputs.month }}/day=${{ steps.partition.outputs.day }}/tool=prowler/run_id=${{ github.run_id }}/"
