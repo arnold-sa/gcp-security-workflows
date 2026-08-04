@@ -2,12 +2,7 @@ name: security
 
 on:
   push:
-    branches:
-      - main
   pull_request:
-  schedule:
-    - cron: "0 3 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,64 +11,20 @@ permissions:
 
 jobs:
   dev-scan:
-    # Trivy filesystem scan runs on push and pull request, but not on the schedule.
-    if: github.event_name != 'schedule'
     uses: arnold-sa/gcp-security-workflows/.github/workflows/dev-scan.yml@dev
     with:
-      results_bucket: ${{ vars.RESULTS_BUCKET }}
+      results_bucket: project_trivy_1
     secrets:
       WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
       RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}
 
-  build:
-    # Replace this placeholder with the real image build for the caller repository.
-    if: github.event_name != 'schedule'
-    needs: dev-scan
-    runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.image.outputs.ref }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build image placeholder
-        id: image
-        run: |
-          echo "Build your container image here."
-          echo "ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/REPOSITORY/IMAGE:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-
-  build-scan:
-    # Trivy image scan receives the image reference produced by the build job.
-    if: github.event_name != 'schedule'
-    needs: build
-    uses: arnold-sa/gcp-security-workflows/.github/workflows/build-scan.yml@dev
-    with:
-      image: ${{ needs.build.outputs.image }}
-      results_bucket: ${{ vars.RESULTS_BUCKET }}
-    secrets:
-      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
-      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}
-
-  deploy-scan:
-    # Prowler scans the live GCP project only after changes reach main.
-    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
-    needs: build-scan
+  prowler-scan:
+    if: github.ref == 'refs/heads/main'
     uses: arnold-sa/gcp-security-workflows/.github/workflows/deploy-scan.yml@dev
     with:
       gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-      results_bucket: ${{ vars.RESULTS_BUCKET }}
+      results_bucket: project_trivy_1
     secrets:
       WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
       PROWLER_SA: ${{ secrets.PROWLER_SA }}
-      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}
-
-  network-scan:
-    # Nmap runs on the nightly schedule against authorized targets only.
-    if: github.event_name == 'schedule'
-    uses: arnold-sa/gcp-security-workflows/.github/workflows/network-scan.yml@dev
-    with:
-      targets: ${{ vars.SCAN_TARGET_CIDR }}
-      results_bucket: ${{ vars.RESULTS_BUCKET }}
-    secrets:
-      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
       RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}

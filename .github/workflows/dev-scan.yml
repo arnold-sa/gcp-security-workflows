@@ -34,7 +34,6 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
-          # This identity only needs bucket write access, such as roles/storage.objectCreator.
 
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
@@ -43,7 +42,6 @@ jobs:
         id: partition
         shell: bash
         run: |
-          # UTC keeps bucket partitions consistent across runner locations.
           echo "year=$(date -u +%Y)" >> "$GITHUB_OUTPUT"
           echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
           echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
@@ -52,7 +50,7 @@ jobs:
         run: mkdir -p dev-results
 
       - name: Run Trivy filesystem scan as JSON
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -63,19 +61,18 @@ jobs:
           ignore-unfixed: true
 
       - name: Run Trivy filesystem scan as SARIF
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret,misconfig
           format: sarif
           output: dev-results/trivy-fs.sarif
-          # DEV gates on Trivy findings because issues are cheapest to fix before merge.
           exit-code: "1"
           ignore-unfixed: true
 
       - name: Run Trivy filesystem scan as HTML
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         if: always()
         with:
           scan-type: fs
