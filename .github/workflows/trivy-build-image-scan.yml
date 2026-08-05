@@ -1,0 +1,108 @@
+name: Trivy - BUILD container image scan
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Full image reference to scan before it is pushed to Artifact Registry.
+        required: true
+        type: string
+      results_bucket:
+        description: GCS bucket name for durable scan result storage.
+        required: true
+        type: string
+    secrets:
+      WIF_PROVIDER:
+        description: Workload Identity Provider resource name.
+        required: true
+      RESULTS_UPLOADER_SA:
+        description: Service account with permission to create objects in the results bucket.
+        required: true
+
+jobs:
+  trivy-image:
+    name: Trivy image scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+
+    steps:
+      - name: Authenticate to GCP for result upload
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
+          # This identity only needs bucket write access, such as roles/storage.objectCreator.
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Calculate GCS partition path
+        id: partition
+        shell: bash
+        run: |
+          # UTC keeps bucket partitions consistent across runner locations.
+          echo "year=$(date -u +%Y)" >> "$GITHUB_OUTPUT"
+          echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
+          echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare BUILD results directory
+        run: mkdir -p build-results
+
+      - name: Run Trivy image scan as JSON
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ inputs.image }}
+          format: json
+          output: build-results/trivy-image.json
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Run Trivy image scan as SARIF
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ inputs.image }}
+          format: sarif
+          output: build-results/trivy-image.sarif
+          # BUILD blocks only on high-impact image findings.
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Run Trivy image scan as HTML
+        uses: aquasecurity/trivy-action@0.28.0
+        if: always()
+        with:
+          image-ref: ${{ inputs.image }}
+          format: template
+          template: "@/contrib/html.tpl"
+          output: build-results/trivy-image.html
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload BUILD Trivy reports as GitHub artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-image-${{ github.run_id }}
+          path: build-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload BUILD SARIF to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: build-results/trivy-image.sarif
+        continue-on-error: true
+
+      - name: Upload BUILD Trivy reports to GCS
+        if: always()
+        run: |
+          gcloud storage cp -r build-results/* \
+            "gs://${{ inputs.results_bucket }}/year=${{ steps.partition.outputs.year }}/month=${{ steps.partition.outputs.month }}/day=${{ steps.partition.outputs.day }}/tool=trivy_image/run_id=${{ github.run_id }}/"
