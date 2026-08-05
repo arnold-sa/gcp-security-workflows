@@ -1,4 +1,4 @@
-name: DEV - Trivy filesystem scan
+name: Trivy - DEV filesystem scan
 
 on:
   workflow_call:

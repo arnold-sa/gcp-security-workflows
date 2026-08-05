@@ -1,4 +1,4 @@
-name: security
+name: Security - Trivy and Prowler scans
 
 on:
   push:
@@ -10,17 +10,17 @@ permissions:
   security-events: write
 
 jobs:
-  dev-scan:
-    uses: arnold-sa/gcp-security-workflows/.github/workflows/dev-scan.yml@dev
+  trivy-filesystem-scan:
+    uses: arnold-sa/gcp-security-workflows/.github/workflows/trivy-dev-filesystem-scan.yml@dev
     with:
       results_bucket: project_trivy_1
     secrets:
       WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
       RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}
 
-  prowler-scan:
+  prowler-gcp-scan:
     if: github.ref == 'refs/heads/main'
-    uses: arnold-sa/gcp-security-workflows/.github/workflows/deploy-scan.yml@dev
+    uses: arnold-sa/gcp-security-workflows/.github/workflows/prowler-deploy-gcp-scan.yml@dev
     with:
       gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
       results_bucket: project_trivy_1

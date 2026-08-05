@@ -1,4 +1,4 @@
-name: NETWORK - Nmap scan
+name: Nmap - NETWORK scan
 
 on:
   workflow_call:

@@ -9,7 +9,7 @@ Reusable GitHub Actions workflows for a minimal GCP-only security scanning pipel
 
 The real workflow logic lives in this central repository. Individual infrastructure
 repositories should call these files with GitHub Actions reusable workflows, as shown in
-`gcp-infra-repo-example/.github/workflows/security.yml`.
+`gcp-infra-repo-example/.github/workflows/trivy-prowler-security.yml`.
 
 ## Workflow Diagram
 
@@ -64,7 +64,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | `WIF_PROVIDER` | Secret | all reusable workflows | Full GCP Workload Identity Provider resource name used by `google-github-actions/auth`. |
 | `RESULTS_UPLOADER_SA` | Secret | all reusable workflows | Narrowly scoped service account used to upload scan output to GCS. Grant it `roles/storage.objectCreator` on the results bucket. |
-| `PROWLER_SA` | Secret | `deploy-scan.yml` | GCP service account email that Prowler impersonates to scan live project configuration. |
+| `PROWLER_SA` | Secret | `prowler-deploy-gcp-scan.yml` | GCP service account email that Prowler impersonates to scan live project configuration. |
 | `GCP_PROJECT_ID` | Repository variable | caller deploy job | Project ID passed to the reusable deploy scan after Terraform succeeds. |
 | `RESULTS_BUCKET` | Repository variable | all reusable workflows | GCS bucket name passed as the required `results_bucket` input for durable scan result storage. |
 | `SCAN_TARGET_CIDR` | Repository variable | caller network job | CIDR range or target list used by the nightly network scan. |
@@ -77,10 +77,10 @@ Each reusable workflow requires a `results_bucket` input. Results are uploaded w
 
 | Workflow | GCS prefix |
 | --- | --- |
-| `dev-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=<run_id>/` |
-| `build-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=<run_id>/` |
-| `deploy-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=prowler/run_id=<run_id>/` |
-| `network-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=nmap/run_id=<run_id>/` |
+| `trivy-dev-filesystem-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=<run_id>/` |
+| `trivy-build-image-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=<run_id>/` |
+| `prowler-deploy-gcp-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=prowler/run_id=<run_id>/` |
+| `nmap-network-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=nmap/run_id=<run_id>/` |
 
 Create the results bucket before using these workflows. Recommended bucket settings:
 uniform bucket-level access, public access prevention, object versioning, and a lifecycle
@@ -89,19 +89,19 @@ reachable services, and cloud misconfigurations, so treat the bucket as sensitiv
 
 ## Workflow Notes
 
-`dev-scan.yml` blocks on Trivy findings because it runs before code is merged. This is the
+`trivy-dev-filesystem-scan.yml` blocks on Trivy findings because it runs before code is merged. This is the
 lowest-cost place to fix dependency, secret, and IaC configuration issues.
 
-`build-scan.yml` scans the built container image and blocks only on `CRITICAL` and `HIGH`
+`trivy-build-image-scan.yml` scans the built container image and blocks only on `CRITICAL` and `HIGH`
 findings. It uploads JSON, SARIF, and HTML as artifacts, publishes SARIF to GitHub code
 scanning, and copies the reports into GCS for longer-term retention.
 
-`deploy-scan.yml` authenticates to GCP through GitHub OIDC and Workload Identity Federation,
+`prowler-deploy-gcp-scan.yml` authenticates to GCP through GitHub OIDC and Workload Identity Federation,
 then runs `prowler gcp --project-ids <project_id>`. Prowler findings do not fail the job
 because the infrastructure is already live after `terraform apply`; the workflow uploads
 JSON-OCSF, HTML, and CSV artifacts for alerting and follow-up, then copies the same output
 directory to GCS.
 
-`network-scan.yml` is designed for scheduled execution only from caller repositories. It
+`nmap-network-scan.yml` is designed for scheduled execution only from caller repositories. It
 runs Nmap with service detection and uploads XML plus standard text output both as a
 GitHub artifact and to GCS.

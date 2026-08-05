@@ -1,4 +1,4 @@
-name: BUILD - Trivy container image scan
+name: Trivy - BUILD container image scan
 
 on:
   workflow_call:

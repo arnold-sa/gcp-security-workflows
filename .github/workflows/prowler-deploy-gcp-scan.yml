@@ -1,4 +1,4 @@
-name: DEPLOY - Prowler GCP scan
+name: Prowler - DEPLOY GCP scan
 
 on:
   workflow_call:
@@ -65,8 +65,19 @@ jobs:
             exit 1
           fi
 
+      - name: Show scanner identity and project context
+        shell: bash
+        run: |
+          echo "Configured project: ${{ inputs.gcp_project_id }}"
+          echo "Active gcloud account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          echo "Project visible to scanner:"
+          gcloud projects describe "${{ inputs.gcp_project_id }}" --format="value(projectId)"
+
       - name: Install Prowler
-        run: python -m pip install --upgrade prowler
+        run: |
+          python -m pip install --upgrade prowler
+          prowler --version
 
       - name: Run Prowler against the live GCP project
         run: |
@@ -75,15 +86,17 @@ jobs:
             --project-ids "${{ inputs.gcp_project_id }}" \
             --output-directory prowler-results \
             --output-formats json-ocsf html csv \
+            --status PASS FAIL MANUAL \
             || true
-          # Prowler is non-blocking here so live infrastructure findings can be triaged.
+          # Include PASS, FAIL, and MANUAL so the reports show scan evidence even
+          # when the scanner identity has no failed findings to report.
 
       - name: Ensure Prowler result directory is not empty
         if: always()
         shell: bash
         run: |
           if ! find prowler-results -type f | grep -q .; then
-            printf 'Prowler completed, but no report files were produced.\nProject: %s\nRun ID: %s\n' \
+            printf 'Prowler completed, but no report files were produced.\nProject: %s\nRun ID: %s\nExpected statuses: PASS, FAIL, MANUAL\n' \
               "${{ inputs.gcp_project_id }}" \
               "${{ github.run_id }}" \
               > prowler-results/no-findings.txt
