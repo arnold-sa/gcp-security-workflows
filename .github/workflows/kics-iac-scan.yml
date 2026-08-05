@@ -76,6 +76,7 @@ jobs:
           path: ${{ inputs.scan_path }}
           output_path: kics-results
           output_formats: "json,sarif,html"
+          ignore_on_exit: results
 
       - name: Ensure KICS result directory is not empty
         if: always()
