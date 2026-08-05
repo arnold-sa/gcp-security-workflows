@@ -36,6 +36,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: DEBUG - Check inputs and secrets
+        shell: bash
+        run: |
+          echo "The Project ID variable is: '${{ inputs.gcp_project_id }}'"
+
+          if [ -z "${{ secrets.PROWLER_SA }}" ]; then
+            echo "::error::The PROWLER_SA secret is completely EMPTY! The caller repo is not passing it."
+            exit 1
+          else
+            echo "The PROWLER_SA secret is successfully populated."
+          fi
+
       - name: Authenticate to GCP as Prowler scanner
         uses: google-github-actions/auth@v2
         with:
