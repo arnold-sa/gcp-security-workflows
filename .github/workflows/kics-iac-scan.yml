@@ -70,7 +70,7 @@ jobs:
         run: mkdir -p kics-results
 
       - name: Run KICS IaC scan
-        uses: Checkmarx/kics-github-action@v1.7.0
+        uses: checkmarx/kics-github-action@v2.1.20
         continue-on-error: true
         with:
           path: ${{ inputs.scan_path }}
