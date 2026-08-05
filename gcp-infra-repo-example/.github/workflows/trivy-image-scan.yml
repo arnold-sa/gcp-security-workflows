@@ -1,0 +1,24 @@
+name: Caller - Trivy image scan
+
+"on":
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Full container image reference to scan.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+
+jobs:
+  trivy-image-scan:
+    uses: arnold-sa/gcp-security-workflows/.github/workflows/trivy-build-image-scan.yml@dev
+    with:
+      image: ${{ inputs.image }}
+      results_bucket: project_trivy_1
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}

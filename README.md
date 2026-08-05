@@ -18,6 +18,7 @@ flowchart TD
     caller[Caller infrastructure repository] --> gha[GitHub Actions reusable workflows]
 
     gha --> dev[DEV: Trivy filesystem scan]
+    gha --> kics[KICS: IaC security scan]
     gha --> build[BUILD: Trivy image scan]
     gha --> deploy[DEPLOY: Prowler GCP scan]
     gha --> network[NETWORK: Nmap scan]
@@ -31,16 +32,19 @@ flowchart TD
     secrets --> targets_input[SCAN_TARGET_CIDR]
 
     dev --> dev_out[dev-results: JSON, SARIF, HTML]
+    kics --> kics_out[kics-results: JSON, SARIF, HTML]
     build --> build_out[build-results: JSON, SARIF, HTML]
     deploy --> deploy_out[prowler-results: JSON-OCSF, HTML, CSV]
     network --> network_out[nmap-results: XML, text]
 
     dev_out --> artifacts[GitHub artifacts]
+    kics_out --> artifacts
     build_out --> artifacts
     deploy_out --> artifacts
     network_out --> artifacts
 
     dev_out --> code_scanning[GitHub code scanning]
+    kics_out --> code_scanning
     build_out --> code_scanning
 
     gha --> auth[google-github-actions/auth with Workload Identity Federation]
@@ -48,11 +52,13 @@ flowchart TD
     gcloud --> gcs[GCS results bucket]
 
     dev_out --> dev_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=RUN_ID/]
+    kics_out --> kics_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=kics/run_id=RUN_ID/]
     build_out --> build_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=RUN_ID/]
     deploy_out --> deploy_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=prowler/run_id=RUN_ID/]
     network_out --> network_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=nmap/run_id=RUN_ID/]
 
     dev_gcs --> gcs
+    kics_gcs --> gcs
     build_gcs --> gcs
     deploy_gcs --> gcs
     network_gcs --> gcs
@@ -78,6 +84,7 @@ Each reusable workflow requires a `results_bucket` input. Results are uploaded w
 | Workflow | GCS prefix |
 | --- | --- |
 | `trivy-dev-filesystem-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=<run_id>/` |
+| `kics-iac-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=kics/run_id=<run_id>/` |
 | `trivy-build-image-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=<run_id>/` |
 | `prowler-deploy-gcp-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=prowler/run_id=<run_id>/` |
 | `nmap-network-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=nmap/run_id=<run_id>/` |
@@ -91,6 +98,10 @@ reachable services, and cloud misconfigurations, so treat the bucket as sensitiv
 
 `trivy-dev-filesystem-scan.yml` blocks on Trivy findings because it runs before code is merged. This is the
 lowest-cost place to fix dependency, secret, and IaC configuration issues.
+
+`kics-iac-scan.yml` scans Infrastructure as Code for misconfigurations before deployment.
+It uploads JSON, SARIF, and HTML as artifacts, publishes SARIF to GitHub code scanning,
+and copies the reports into GCS under the `tool=kics` partition.
 
 `trivy-build-image-scan.yml` scans the built container image and blocks only on `CRITICAL` and `HIGH`
 findings. It uploads JSON, SARIF, and HTML as artifacts, publishes SARIF to GitHub code

@@ -1,0 +1,19 @@
+name: Caller - Trivy filesystem scan
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+
+jobs:
+  trivy-filesystem-scan:
+    uses: arnold-sa/gcp-security-workflows/.github/workflows/trivy-dev-filesystem-scan.yml@dev
+    with:
+      results_bucket: project_trivy_1
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      RESULTS_UPLOADER_SA: ${{ secrets.RESULTS_UPLOADER_SA }}

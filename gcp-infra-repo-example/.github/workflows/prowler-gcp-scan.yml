@@ -1,4 +1,4 @@
-name: Test - Prowler GCP scan
+name: Caller - Prowler GCP scan
 
 "on":
   workflow_dispatch:
