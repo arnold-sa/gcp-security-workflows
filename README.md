@@ -3,9 +3,10 @@
 Reusable GitHub Actions workflows for a minimal GCP-only security scanning pipeline:
 
 1. DEV: Trivy filesystem, secret, and config scan on push and pull request.
-2. BUILD: Trivy container image scan after image build and before push.
-3. DEPLOY: Prowler scan against live GCP configuration after `terraform apply`.
-4. NETWORK: Nmap plus an OpenVAS/GVM integration placeholder on a nightly schedule.
+2. KICS: Infrastructure as Code scan for Terraform, Kubernetes, Dockerfile, and other IaC misconfigurations.
+3. BUILD: Trivy container image scan after image build and before push.
+4. DEPLOY: Prowler scan against live GCP configuration after `terraform apply`.
+5. NETWORK: Nmap service detection scan on a nightly schedule.
 
 The real workflow logic lives in this central repository. Individual infrastructure
 repositories should call these files with GitHub Actions reusable workflows, as shown in
@@ -100,8 +101,10 @@ reachable services, and cloud misconfigurations, so treat the bucket as sensitiv
 lowest-cost place to fix dependency, secret, and IaC configuration issues.
 
 `kics-iac-scan.yml` scans Infrastructure as Code for misconfigurations before deployment.
-It uploads JSON, SARIF, and HTML as artifacts, publishes SARIF to GitHub code scanning,
-and copies the reports into GCS under the `tool=kics` partition.
+KICS catches risky IaC patterns before Terraform, Kubernetes, or container configuration
+is applied to the environment. It uploads JSON, SARIF, and HTML as artifacts, publishes
+SARIF to GitHub code scanning, and copies the reports into GCS under the `tool=kics`
+partition.
 
 `trivy-build-image-scan.yml` scans the built container image and blocks only on `CRITICAL` and `HIGH`
 findings. It uploads JSON, SARIF, and HTML as artifacts, publishes SARIF to GitHub code

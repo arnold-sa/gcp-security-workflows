@@ -1,4 +1,4 @@
-name: Caller - Trivy image scan
+name: Trivy image scan
 
 "on":
   workflow_dispatch:

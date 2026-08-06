@@ -29,17 +29,17 @@ jobs:
       id-token: write
 
     steps:
-      - name: Authenticate to GCP for result upload
+      - name: Nmap - Authenticate to GCP for result upload
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
           # This identity only needs bucket write access, such as roles/storage.objectCreator.
 
-      - name: Set up gcloud CLI
+      - name: Nmap - Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Calculate GCS partition path
+      - name: Nmap - Calculate GCS partition path
         id: partition
         shell: bash
         run: |
@@ -48,10 +48,10 @@ jobs:
           echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
           echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Install Nmap
+      - name: Nmap - Install CLI
         run: sudo apt-get update && sudo apt-get install -y nmap
 
-      - name: Run Nmap service detection
+      - name: Nmap - Run service detection
         run: |
           mkdir -p nmap-results
           # Accept either comma-separated or newline-separated targets from the caller.
@@ -61,7 +61,7 @@ jobs:
             -oN nmap-results/nmap.txt \
             -iL nmap-results/targets.txt
 
-      - name: Upload Nmap reports as GitHub artifact
+      - name: Nmap - Upload reports as GitHub artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -70,7 +70,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Nmap reports to GCS
+      - name: Nmap - Upload reports to GCS
         if: always()
         run: |
           gcloud storage cp -r nmap-results/* \

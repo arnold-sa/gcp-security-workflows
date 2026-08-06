@@ -31,20 +31,20 @@ jobs:
       security-events: write
 
     steps:
-      - name: Checkout code
+      - name: KICS - Checkout code
         uses: actions/checkout@v4
 
-      - name: Authenticate to GCP for result upload
+      - name: KICS - Authenticate to GCP for result upload
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
           # This identity only needs bucket write access, such as roles/storage.objectCreator.
 
-      - name: Set up gcloud CLI
+      - name: KICS - Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Calculate GCS partition path
+      - name: KICS - Calculate GCS partition path
         id: partition
         shell: bash
         run: |
@@ -53,7 +53,7 @@ jobs:
           echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
           echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Validate required inputs
+      - name: KICS - Validate required inputs
         shell: bash
         run: |
           if [ -z "${{ inputs.results_bucket }}" ]; then
@@ -66,10 +66,10 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare KICS results directory
+      - name: KICS - Prepare results directory
         run: mkdir -p kics-results
 
-      - name: Run KICS IaC scan
+      - name: KICS - Run IaC scan
         uses: checkmarx/kics-github-action@v2.1.20
         continue-on-error: true
         with:
@@ -78,7 +78,7 @@ jobs:
           output_formats: "json,sarif,html"
           ignore_on_exit: results
 
-      - name: Ensure KICS result directory is not empty
+      - name: KICS - Ensure result directory is not empty
         if: always()
         shell: bash
         run: |
@@ -89,7 +89,7 @@ jobs:
               > kics-results/no-findings.txt
           fi
 
-      - name: Upload KICS reports as GitHub artifact
+      - name: KICS - Upload reports as GitHub artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -98,14 +98,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload KICS SARIF to GitHub code scanning
+      - name: KICS - Upload SARIF to GitHub code scanning
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: kics-results/results.sarif
         continue-on-error: true
 
-      - name: Upload KICS reports to GCS
+      - name: KICS - Upload reports to GCS
         if: always()
         run: |
           find kics-results -type d -empty -delete

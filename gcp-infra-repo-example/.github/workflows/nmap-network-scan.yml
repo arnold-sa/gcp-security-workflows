@@ -1,8 +1,6 @@
-name: Caller - Nmap network scan
+name: Nmap network scan
 
 "on":
-  schedule:
-    - cron: "0 3 * * *"
   workflow_dispatch:
 
 permissions:

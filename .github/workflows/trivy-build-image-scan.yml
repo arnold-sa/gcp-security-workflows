@@ -30,17 +30,17 @@ jobs:
       security-events: write
 
     steps:
-      - name: Authenticate to GCP for result upload
+      - name: Trivy - Authenticate to GCP for result upload
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
           # This identity only needs bucket write access, such as roles/storage.objectCreator.
 
-      - name: Set up gcloud CLI
+      - name: Trivy - Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Calculate GCS partition path
+      - name: Trivy - Calculate GCS partition path
         id: partition
         shell: bash
         run: |
@@ -49,10 +49,10 @@ jobs:
           echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
           echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare BUILD results directory
+      - name: Trivy - Prepare BUILD results directory
         run: mkdir -p build-results
 
-      - name: Run Trivy image scan as JSON
+      - name: Trivy - Run image scan as JSON
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ inputs.image }}
@@ -62,7 +62,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
-      - name: Run Trivy image scan as SARIF
+      - name: Trivy - Run image scan as SARIF
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ inputs.image }}
@@ -73,7 +73,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
-      - name: Run Trivy image scan as HTML
+      - name: Trivy - Run image scan as HTML
         uses: aquasecurity/trivy-action@0.28.0
         if: always()
         with:
@@ -85,7 +85,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
-      - name: Upload BUILD Trivy reports as GitHub artifact
+      - name: Trivy - Upload BUILD reports as GitHub artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -94,14 +94,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload BUILD SARIF to GitHub code scanning
+      - name: Trivy - Upload BUILD SARIF to GitHub code scanning
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: build-results/trivy-image.sarif
         continue-on-error: true
 
-      - name: Upload BUILD Trivy reports to GCS
+      - name: Trivy - Upload BUILD reports to GCS
         if: always()
         run: |
           gcloud storage cp -r build-results/* \
