@@ -1,8 +1,6 @@
-name: Caller - KICS IaC scan
+name: KICS IaC scan
 
 "on":
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:

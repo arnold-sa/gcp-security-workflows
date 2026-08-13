@@ -74,7 +74,7 @@ flowchart TD
 | `PROWLER_SA` | Secret | `prowler-deploy-gcp-scan.yml` | GCP service account email that Prowler impersonates to scan live project configuration. |
 | `GCP_PROJECT_ID` | Repository variable | caller deploy job | Project ID passed to the reusable deploy scan after Terraform succeeds. |
 | `RESULTS_BUCKET` | Repository variable | all reusable workflows | GCS bucket name passed as the required `results_bucket` input for durable scan result storage. |
-| `SCAN_TARGET_CIDR` | Repository variable | caller network job | CIDR range or target list used by the nightly network scan. |
+| `SCAN_TARGET_CIDR` | Repository variable | caller network job | CIDR range or target list used by the network scan when external IP discovery is disabled. |
 
 Use Workload Identity Federation only. Do not create or store static GCP JSON service
 account keys for these workflows.
@@ -116,6 +116,9 @@ because the infrastructure is already live after `terraform apply`; the workflow
 JSON-OCSF, HTML, and CSV artifacts for alerting and follow-up, then copies the same output
 directory to GCS.
 
-`nmap-network-scan.yml` is designed for scheduled execution only from caller repositories. It
-runs Nmap with service detection and uploads XML plus standard text output both as a
-GitHub artifact and to GCS.
+`nmap-network-scan.yml` is designed for scheduled execution from caller repositories. It
+can scan caller-provided targets or discover external GCP forwarding-rule IPs with
+`gcloud compute forwarding-rules list`. It runs Nmap with service detection and uploads
+XML, normal text, and grepable output both as a GitHub artifact and to GCS. When external
+IP discovery is enabled, the upload service account also needs read access such as
+`roles/compute.viewer` on the scanned project.
