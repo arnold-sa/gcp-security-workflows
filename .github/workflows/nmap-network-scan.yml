@@ -18,6 +18,16 @@ on:
       RESULTS_UPLOADER_SA:
         description: Service account with permission to create objects in the results bucket.
         required: true
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: CIDR range or newline/comma-separated target list to scan. Defaults to vars.SCAN_TARGET_CIDR when omitted.
+        required: false
+        type: string
+      results_bucket:
+        description: GCS bucket name for durable scan result storage. Defaults to vars.RESULTS_BUCKET when omitted.
+        required: false
+        type: string
 
 jobs:
   nmap:
@@ -39,6 +49,35 @@ jobs:
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Resolve Nmap runtime inputs
+        id: runtime
+        shell: bash
+        run: |
+          TARGETS="${{ inputs.targets }}"
+          if [ -z "$TARGETS" ]; then
+            TARGETS="${{ vars.SCAN_TARGET_CIDR }}"
+          fi
+          if [ -z "$TARGETS" ]; then
+            echo "::error::targets is empty. Pass it as an input or set vars.SCAN_TARGET_CIDR."
+            exit 1
+          fi
+
+          RESULTS_BUCKET="${{ inputs.results_bucket }}"
+          if [ -z "$RESULTS_BUCKET" ]; then
+            RESULTS_BUCKET="${{ vars.RESULTS_BUCKET }}"
+          fi
+          if [ -z "$RESULTS_BUCKET" ]; then
+            echo "::error::results_bucket is empty. Pass it as an input or set vars.RESULTS_BUCKET."
+            exit 1
+          fi
+
+          {
+            echo "targets<<EOF"
+            echo "$TARGETS"
+            echo "EOF"
+            echo "results_bucket=$RESULTS_BUCKET"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Calculate GCS partition path
         id: partition
         shell: bash
@@ -55,7 +94,7 @@ jobs:
         run: |
           mkdir -p nmap-results
           # Accept either comma-separated or newline-separated targets from the caller.
-          printf '%s\n' '${{ inputs.targets }}' | tr ',' '\n' > nmap-results/targets.txt
+          printf '%s\n' '${{ steps.runtime.outputs.targets }}' | tr ',' '\n' > nmap-results/targets.txt
           nmap -sV \
             -oX nmap-results/nmap.xml \
             -oN nmap-results/nmap.txt \
@@ -74,4 +113,4 @@ jobs:
         if: always()
         run: |
           gcloud storage cp -r nmap-results/* \
-            "gs://${{ inputs.results_bucket }}/year=${{ steps.partition.outputs.year }}/month=${{ steps.partition.outputs.month }}/day=${{ steps.partition.outputs.day }}/tool=nmap/run_id=${{ github.run_id }}/"
+            "gs://${{ steps.runtime.outputs.results_bucket }}/year=${{ steps.partition.outputs.year }}/month=${{ steps.partition.outputs.month }}/day=${{ steps.partition.outputs.day }}/tool=nmap/run_id=${{ github.run_id }}/"
