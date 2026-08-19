@@ -81,7 +81,7 @@ jobs:
       - name: KICS - Validate required inputs
         shell: bash
         run: |
-          if [ -z "${{ inputs.results_bucket }}" ]; then
+          if [ -z "${{ steps.runtime.outputs.results_bucket }}" ]; then
             echo "::error::results_bucket is empty. Set vars.RESULTS_BUCKET or pass a workflow input."
             exit 1
           fi
