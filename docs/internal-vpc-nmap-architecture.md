@@ -25,8 +25,8 @@ apt-get update
 apt-get install -y nmap curl
 
 # 2. Define target parameters
-TARGET_CIDR="10.0.1.0/24"
-BUCKET_NAME="project_trivy1"
+TARGET_CIDR="Target CIDR"
+BUCKET_NAME="bucket_name"
 
 # 3. Calculate time for GCS Hive Partitioning
 YEAR=$(date -u +%Y)

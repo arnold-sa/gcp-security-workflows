@@ -1,3 +1,4 @@
+
 Here is your fully integrated, step-by-step execution guide. Every phase now includes the exact commands you need to run, explicitly stating *where* to run them (in Cloud Shell vs. inside a specific VM).
 
 This version drops Nmap, targets a single host, includes the 1-hour fail-safe, extracts clean XML, and walks you entirely through the Greenbone Docker deployment.
