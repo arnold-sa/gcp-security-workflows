@@ -1,0 +1,139 @@
+name: KICS - IaC security scan
+
+"on":
+  workflow_call:
+    inputs:
+      scan_path:
+        description: Path to the Infrastructure as Code files to scan.
+        required: false
+        default: "."
+        type: string
+      results_bucket:
+        description: GCS bucket name for durable scan result storage.
+        required: true
+        type: string
+    secrets:
+      WIF_PROVIDER:
+        description: Workload Identity Provider resource name.
+        required: true
+      RESULTS_UPLOADER_SA:
+        description: Service account with permission to create objects in the results bucket.
+        required: true
+  workflow_dispatch:
+    inputs:
+      scan_path:
+        description: Path to the Infrastructure as Code files to scan.
+        required: false
+        default: "."
+        type: string
+      results_bucket:
+        description: GCS bucket name for durable scan result storage. Defaults to vars.RESULTS_BUCKET when omitted.
+        required: false
+        type: string
+
+jobs:
+  kics-iac:
+    name: KICS Infrastructure as Code scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+
+    steps:
+      - name: KICS - Checkout code
+        uses: actions/checkout@v4
+
+      - name: KICS - Authenticate to GCP for result upload
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
+          # This identity only needs bucket write access, such as roles/storage.objectCreator.
+
+      - name: KICS - Resolve runtime inputs
+        id: runtime
+        shell: bash
+        run: |
+          RESULTS_BUCKET="${{ inputs.results_bucket }}"
+          if [ -z "$RESULTS_BUCKET" ]; then
+            RESULTS_BUCKET="${{ vars.RESULTS_BUCKET }}"
+          fi
+          if [ -z "$RESULTS_BUCKET" ]; then
+            echo "::error::results_bucket is empty. Pass it as an input or set vars.RESULTS_BUCKET."
+            exit 1
+          fi
+          echo "results_bucket=$RESULTS_BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: KICS - Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: KICS - Calculate GCS partition path
+        id: partition
+        shell: bash
+        run: |
+          # UTC keeps bucket partitions consistent across runner locations.
+          echo "year=$(date -u +%Y)" >> "$GITHUB_OUTPUT"
+          echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
+          echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
+
+      - name: KICS - Validate required inputs
+        shell: bash
+        run: |
+          if [ -z "${{ steps.runtime.outputs.results_bucket }}" ]; then
+            echo "::error::results_bucket is empty. Set vars.RESULTS_BUCKET or pass a workflow input."
+            exit 1
+          fi
+
+          if [ -z "${{ inputs.scan_path }}" ]; then
+            echo "::error::scan_path is empty."
+            exit 1
+          fi
+
+      - name: KICS - Prepare results directory
+        run: mkdir -p kics-results
+
+      - name: KICS - Run IaC scan
+        uses: checkmarx/kics-github-action@v2.1.20
+        continue-on-error: true
+        with:
+          path: ${{ inputs.scan_path }}
+          output_path: kics-results
+          output_formats: "json,sarif,html"
+          ignore_on_exit: results
+
+      - name: KICS - Ensure result directory is not empty
+        if: always()
+        shell: bash
+        run: |
+          if ! find kics-results -type f | grep -q .; then
+            printf 'KICS completed, but no report files were produced.\nScan path: %s\nRun ID: %s\n' \
+              "${{ inputs.scan_path }}" \
+              "${{ github.run_id }}" \
+              > kics-results/no-findings.txt
+          fi
+
+      - name: KICS - Upload reports as GitHub artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kics-iac-${{ github.run_id }}
+          path: kics-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: KICS - Upload SARIF to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: kics-results/results.sarif
+        continue-on-error: true
+
+      - name: KICS - Upload reports to GCS
+        if: always()
+        run: |
+          find kics-results -type d -empty -delete
+
+          gcloud storage cp -r kics-results/* \
+            "gs://${{ steps.runtime.outputs.results_bucket }}/year=${{ steps.partition.outputs.year }}/month=${{ steps.partition.outputs.month }}/day=${{ steps.partition.outputs.day }}/tool=kics/run_id=${{ github.run_id }}/"

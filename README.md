@@ -3,9 +3,10 @@
 Reusable GitHub Actions workflows for a minimal GCP-only security scanning pipeline:
 
 1. DEV: Trivy filesystem, secret, and config scan on push and pull request.
-2. BUILD: Trivy container image scan after image build and before push.
-3. DEPLOY: Prowler scan against live GCP configuration after `terraform apply`.
-4. NETWORK: Nmap plus an OpenVAS/GVM integration placeholder on a nightly schedule.
+2. KICS: Infrastructure as Code scan for Terraform, Kubernetes, Dockerfile, and other IaC misconfigurations.
+3. BUILD: Trivy container image scan after image build and before push.
+4. DEPLOY: Prowler scan against live GCP configuration after `terraform apply`.
+5. NETWORK: Nmap service detection scan on a nightly schedule.
 
 The real workflow logic lives in this central repository. Individual infrastructure
 repositories should call these files with GitHub Actions reusable workflows, as shown in
@@ -18,6 +19,7 @@ flowchart TD
     caller[Caller infrastructure repository] --> gha[GitHub Actions reusable workflows]
 
     gha --> dev[DEV: Trivy filesystem scan]
+    gha --> kics[KICS: IaC security scan]
     gha --> build[BUILD: Trivy image scan]
     gha --> deploy[DEPLOY: Prowler GCP scan]
     gha --> network[NETWORK: Nmap scan]
@@ -31,16 +33,19 @@ flowchart TD
     secrets --> targets_input[SCAN_TARGET_CIDR]
 
     dev --> dev_out[dev-results: JSON, SARIF, HTML]
+    kics --> kics_out[kics-results: JSON, SARIF, HTML]
     build --> build_out[build-results: JSON, SARIF, HTML]
     deploy --> deploy_out[prowler-results: JSON-OCSF, HTML, CSV]
     network --> network_out[nmap-results: XML, text]
 
     dev_out --> artifacts[GitHub artifacts]
+    kics_out --> artifacts
     build_out --> artifacts
     deploy_out --> artifacts
     network_out --> artifacts
 
     dev_out --> code_scanning[GitHub code scanning]
+    kics_out --> code_scanning
     build_out --> code_scanning
 
     gha --> auth[google-github-actions/auth with Workload Identity Federation]
@@ -48,11 +53,13 @@ flowchart TD
     gcloud --> gcs[GCS results bucket]
 
     dev_out --> dev_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=RUN_ID/]
+    kics_out --> kics_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=kics/run_id=RUN_ID/]
     build_out --> build_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=RUN_ID/]
     deploy_out --> deploy_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=prowler/run_id=RUN_ID/]
     network_out --> network_gcs[gs://bucket/year=YYYY/month=MM/day=DD/tool=nmap/run_id=RUN_ID/]
 
     dev_gcs --> gcs
+    kics_gcs --> gcs
     build_gcs --> gcs
     deploy_gcs --> gcs
     network_gcs --> gcs
@@ -67,7 +74,7 @@ flowchart TD
 | `PROWLER_SA` | Secret | `prowler-deploy-gcp-scan.yml` | GCP service account email that Prowler impersonates to scan live project configuration. |
 | `GCP_PROJECT_ID` | Repository variable | caller deploy job | Project ID passed to the reusable deploy scan after Terraform succeeds. |
 | `RESULTS_BUCKET` | Repository variable | all reusable workflows | GCS bucket name passed as the required `results_bucket` input for durable scan result storage. |
-| `SCAN_TARGET_CIDR` | Repository variable | caller network job | CIDR range or target list used by the nightly network scan. |
+| `SCAN_TARGET_CIDR` | Repository variable | caller network job | CIDR range or target list used by the network scan when external IP discovery is disabled. |
 
 Use Workload Identity Federation only. Do not create or store static GCP JSON service
 account keys for these workflows.
@@ -78,6 +85,7 @@ Each reusable workflow requires a `results_bucket` input. Results are uploaded w
 | Workflow | GCS prefix |
 | --- | --- |
 | `trivy-dev-filesystem-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_fs/run_id=<run_id>/` |
+| `kics-iac-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=kics/run_id=<run_id>/` |
 | `trivy-build-image-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=trivy_image/run_id=<run_id>/` |
 | `prowler-deploy-gcp-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=prowler/run_id=<run_id>/` |
 | `nmap-network-scan.yml` | `gs://<results_bucket>/year=YYYY/month=MM/day=DD/tool=nmap/run_id=<run_id>/` |
@@ -92,6 +100,12 @@ reachable services, and cloud misconfigurations, so treat the bucket as sensitiv
 `trivy-dev-filesystem-scan.yml` blocks on Trivy findings because it runs before code is merged. This is the
 lowest-cost place to fix dependency, secret, and IaC configuration issues.
 
+`kics-iac-scan.yml` scans Infrastructure as Code for misconfigurations before deployment.
+KICS catches risky IaC patterns before Terraform, Kubernetes, or container configuration
+is applied to the environment. It uploads JSON, SARIF, and HTML as artifacts, publishes
+SARIF to GitHub code scanning, and copies the reports into GCS under the `tool=kics`
+partition.
+
 `trivy-build-image-scan.yml` scans the built container image and blocks only on `CRITICAL` and `HIGH`
 findings. It uploads JSON, SARIF, and HTML as artifacts, publishes SARIF to GitHub code
 scanning, and copies the reports into GCS for longer-term retention.
@@ -102,6 +116,9 @@ because the infrastructure is already live after `terraform apply`; the workflow
 JSON-OCSF, HTML, and CSV artifacts for alerting and follow-up, then copies the same output
 directory to GCS.
 
-`nmap-network-scan.yml` is designed for scheduled execution only from caller repositories. It
-runs Nmap with service detection and uploads XML plus standard text output both as a
-GitHub artifact and to GCS.
+`nmap-network-scan.yml` is designed for scheduled execution from caller repositories. It
+can scan caller-provided targets or discover external GCP forwarding-rule IPs with
+`gcloud compute forwarding-rules list`. It runs Nmap with service detection and uploads
+XML, normal text, and grepable output both as a GitHub artifact and to GCS. When external
+IP discovery is enabled, the upload service account also needs read access such as
+`roles/compute.viewer` on the scanned project.
