@@ -97,18 +97,6 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
-      - name: Trivy - Run image scan as HTML
-        uses: aquasecurity/trivy-action@0.28.0
-        if: always()
-        with:
-          image-ref: ${{ inputs.image }}
-          format: template
-          template: "@/contrib/html.tpl"
-          output: build-results/trivy-image.html
-          exit-code: "0"
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-
       - name: Trivy - Upload BUILD reports as GitHub artifact
         uses: actions/upload-artifact@v4
         if: always()
