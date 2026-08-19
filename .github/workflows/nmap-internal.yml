@@ -1,0 +1,64 @@
+name: Nmap Internal Scan
+
+on:
+  workflow_call:
+    inputs:
+      target_cidr:
+        required: true
+        type: string
+        description: "The CIDR block to scan (e.g., 10.0.1.0/24)"
+      results_bucket:
+        required: true
+        type: string
+        description: "GCS bucket for long-term storage"
+    secrets:
+      WIF_PROVIDER:
+        required: true
+      RESULTS_UPLOADER_SA:
+        required: true
+
+jobs:
+  scan:
+    runs-on: [self-hosted, gcp-internal]
+    permissions:
+      contents: read
+      id-token: write # Required for GCP Workload Identity Federation
+
+    steps:
+      - name: Prepare Nmap environment
+        run: |
+          mkdir -p nmap-results
+          echo "${{ inputs.target_cidr }}" > nmap-results/targets.txt
+
+      - name: Run Nmap Scan
+        # Uses -Pn to skip host discovery (firewall bypass) and targets the generated list
+        run: >
+          nmap -Pn -sV -T4 
+          -iL nmap-results/targets.txt 
+          -oX nmap-results/nmap.xml 
+          -oN nmap-results/nmap.txt
+
+      - name: Calculate Date for GCS Partitioning
+        id: date
+        run: |
+          echo "year=$(date -u +%Y)" >> "$GITHUB_OUTPUT"
+          echo "month=$(date -u +%m)" >> "$GITHUB_OUTPUT"
+          echo "day=$(date -u +%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.RESULTS_UPLOADER_SA }}
+
+      - name: Upload to GCS
+        # Uploads the exact contents of the results folder to the Hive-partitioned path
+        run: >
+          gcloud storage cp nmap-results/* 
+          gs://${{ inputs.results_bucket }}/year=${{ steps.date.outputs.year }}/month=${{ steps.date.outputs.month }}/day=${{ steps.date.outputs.day }}/tool=nmap/run_id=${{ github.run_id }}/
+
+      - name: Upload GitHub Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nmap-${{ github.run_id }}
+          path: nmap-results/
