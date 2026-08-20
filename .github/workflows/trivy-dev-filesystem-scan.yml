@@ -88,6 +88,121 @@ jobs:
           exit-code: "0"
           ignore-unfixed: true
 
+      - name: Trivy - Generate filesystem HTML report
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const input = 'dev-results/trivy-fs.json';
+          const output = 'dev-results/trivy-fs.html';
+
+          if (!fs.existsSync(input)) {
+            console.log(`${input} not found; skipping HTML report generation.`);
+            process.exit(0);
+          }
+
+          const esc = (value) => String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+          const data = JSON.parse(fs.readFileSync(input, 'utf8'));
+          const rows = [];
+
+          for (const result of data.Results || []) {
+            for (const item of result.Vulnerabilities || []) {
+              rows.push({
+                type: 'Vulnerability',
+                target: result.Target,
+                id: item.VulnerabilityID,
+                package: item.PkgName,
+                severity: item.Severity,
+                title: item.Title || item.Description,
+                installed: item.InstalledVersion,
+                fixed: item.FixedVersion,
+              });
+            }
+
+            for (const item of result.Misconfigurations || []) {
+              rows.push({
+                type: 'Misconfiguration',
+                target: result.Target,
+                id: item.ID,
+                package: item.Type,
+                severity: item.Severity,
+                title: item.Title || item.Message,
+                installed: item.Status,
+                fixed: item.Resolution,
+              });
+            }
+
+            for (const item of result.Secrets || []) {
+              rows.push({
+                type: 'Secret',
+                target: result.Target,
+                id: item.RuleID,
+                package: item.Category,
+                severity: item.Severity,
+                title: item.Title,
+                installed: item.StartLine ? `Line ${item.StartLine}` : '',
+                fixed: '',
+              });
+            }
+          }
+
+          const body = rows.length
+            ? rows.map((row) => `
+                <tr>
+                  <td>${esc(row.severity)}</td>
+                  <td>${esc(row.type)}</td>
+                  <td>${esc(row.target)}</td>
+                  <td>${esc(row.id)}</td>
+                  <td>${esc(row.package)}</td>
+                  <td>${esc(row.title)}</td>
+                  <td>${esc(row.installed)}</td>
+                  <td>${esc(row.fixed)}</td>
+                </tr>`).join('')
+            : '<tr><td colspan="8">No findings reported by Trivy.</td></tr>';
+
+          fs.writeFileSync(output, `<!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Trivy filesystem report</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 2rem; color: #17202a; }
+              h1 { margin-bottom: 0.25rem; }
+              table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+              th, td { border: 1px solid #d5d8dc; padding: 0.5rem; text-align: left; vertical-align: top; }
+              th { background: #f4f6f7; }
+              td { font-size: 0.9rem; }
+            </style>
+          </head>
+          <body>
+            <h1>Trivy filesystem report</h1>
+            <p>Generated from ${esc(input)} for run ${esc(process.env.GITHUB_RUN_ID)}.</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Severity</th>
+                  <th>Type</th>
+                  <th>Target</th>
+                  <th>ID</th>
+                  <th>Package / Category</th>
+                  <th>Title</th>
+                  <th>Installed / Status</th>
+                  <th>Fixed / Resolution</th>
+                </tr>
+              </thead>
+              <tbody>${body}</tbody>
+            </table>
+          </body>
+          </html>`);
+          NODE
+
       - name: Trivy - Upload DEV reports as GitHub artifact
         uses: actions/upload-artifact@v4
         if: always()
