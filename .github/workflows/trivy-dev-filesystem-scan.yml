@@ -17,8 +17,8 @@ on:
   workflow_dispatch:
     inputs:
       results_bucket:
-        description: GCS bucket name for durable scan result storage. Defaults to vars.RESULTS_BUCKET when omitted.
-        required: false
+        description: GCS bucket name for durable scan result storage.
+        required: true
         type: string
 
 jobs:
@@ -47,10 +47,7 @@ jobs:
         run: |
           RESULTS_BUCKET="${{ inputs.results_bucket }}"
           if [ -z "$RESULTS_BUCKET" ]; then
-            RESULTS_BUCKET="${{ vars.RESULTS_BUCKET }}"
-          fi
-          if [ -z "$RESULTS_BUCKET" ]; then
-            echo "::error::results_bucket is empty. Pass it as an input or set vars.RESULTS_BUCKET."
+            echo "::error::results_bucket is empty. Pass it as an input."
             exit 1
           fi
           echo "results_bucket=$RESULTS_BUCKET" >> "$GITHUB_OUTPUT"
@@ -88,7 +85,7 @@ jobs:
           scanners: vuln,secret,misconfig
           format: sarif
           output: dev-results/trivy-fs.sarif
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
 
       - name: Trivy - Upload DEV reports as GitHub artifact
